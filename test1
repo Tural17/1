@@ -1,1 +1,151 @@
-1
+HQ-SRV, BR-SRV
+vim /etc/net/ifaces/ens18/options
+echo 192.168.100.2/26 (192.168.200.2/27) > /etc/net/ifaces/ens18/ipv4address
+echo default via 192.168.100.1 (192.168.200.1) > /etc/net/ifaces/ens18/ipv4route
+echo nameserver 77.88.8.8 > /etc/net/ifaces/ens18/resolv.conf
+systemctl restart network
+HQ-RTR
+admin/admin - login/password
+en
+conf t
+hostn hq-rtr
+ip domain-n au-team.irpo
+ntp timezone utc+3
+int int0
+descr toISP
+ip a 172.16.1.14/28
+ip n o
+port te0
+se te0/int0
+enc unt
+c ip int int0
+(config)#int vl100
+descr SRV
+ip a 192.168.100.1/26
+ip n i
+(config)#int vl200
+descr CLI
+ip a 192.168.100.65/28
+ip n i
+(config)#int MGMT
+descr MGMT
+ip a 192.168.100.81/29
+port te1
+se te1/vl100
+enc dot 100 ex
+re pop 1
+c ip int vl100
+ex
+se te1/vl200
+enc dot 200 ex
+re pop 1
+c ip int vl200
+ex
+se te1/MGMT
+enc dot 999 ex
+re pop 1
+c ip int MGMT
+ip route 0.0.0.0/0 172.16.1.1
+write
+BR-RTR
+admin/admin - login/password
+en
+conf t
+hostn br-rtr
+ip domain-n au-team.irpo
+ntp timezone utc+3
+int int0
+descr toISP
+ip a 172.16.2.14/28
+ip n o
+port te0
+se te0/int0
+enc unt
+c ip int int0
+
+int int1
+descr toISP
+ip a 192.168.200.1/27
+ip n i
+port te1
+se te1/int1
+enc unt
+c ip int int1
+ip route 0.0.0.0/0 172.16.2.1
+write
+ISP
+echo nameserver 77.88.8.8  > /etc/net/ifaces/ens18/resolv.conf
+systemctl restart network
+mkdir /etc/net/ifaces/ens{19,20}
+cp /etc/net/iface/options /etc/net/iface/ens19(20)/
+echo 172.16.1.1/28 > /etc/net/iface/ens19/ipv4address
+echo 172.16.2.1/28 > /etc/net/iface/ens20/ipv4address
+vim /ens19(20)/options
+vim /etc/net/sysctl.conf
+sysctl -p /etc/sysctl.conf
+
+iptables -t nat -A POSTROUTING -o ens18 -s 172.16.1.0/28 -j MASQUERADE
+iptables -t nat -A POSTROUTING -o ens18 -s 172.16.2.0/28 -j MASQUERADE
+iptables-save > /etc/sysconfig/iptables
+systemctl enable --now iptables
+systemctl restart network
+HQ-SRV, BR-SRV
+useradd  remote_user -u 2026 -U -m
+passwd remote_user
+P@ssw0rd
+usermod -aG wheel remote_user
+echo “remote_user ALL=(ALL:ALL) NOPASSWD: ALL” >> /etc/sudoers
+systemctl restart network
+Vim /etc/openssh/sshd_config
+Port 2026
+MaxAuthTries 2
+Banner /etc/openssh/banner
+AllowUsers remote_user
+vim /etc/openssh/banner
+*Authorized access only*
+systemctl restart sshd
+
+HQ-RTR , BR-RTR
+en
+conf t 
+user net_admin
+pas P@ssword
+role admin
+write
+HQ-RTR, BR-RTR
+(config)# int tunnel.0
+descr toBR {toHQ}
+ip a 10.10.10.1/30 {10.10.10.2/30}
+ip mtu 1476
+ip tun 172.16.1.14 172.16.2.14 {172.16.2.14 172.16.1.14} mode gre
+end
+write
+sh int tunnel.0 (BR – ping 10.10.10.1)
+HQ-RTR, BR-RTR
+(config)#router ospf 1
+net 10.10.10.0/30 a 0 {10.10.10.0/30}
+net 192.168.100.0/26 a 0 {192.168.200.0/27}
+net 192.168.100.64/28 a 0 { не нужно }
+net 192.168.100.80/29 a 0 { не нужно }
+p d
+no p tunnel.0
+(config)#int tunnel.0
+(config-if-tunnel)#ip ospf a(tab) m(tab)
+(config-if-tunnel)#ip ospf me 1 md5 P@ssw0rd
+write
+HQ-RTR, BR-RTR
+int vl100  int int1
+ip nat inside  ip nat inside
+int vl200  int int0
+ip nat inside  ip nat outside
+int int0
+ip nat outside
+ip nat pool NAT_POOL 192.168.100.1-192.168.100.254 {192.168.200.1-192.168.200.254}
+ip nat s d i p NAT_POOL o i int0
+write
+HQ-RTR	
+(config)#ip pool HQ-CLI 192.168.100.66-192.168.100.78
+dhcp-s 1
+P HQ-CLI 1
+mask 28
+gateway 192.168.100.65
